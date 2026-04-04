@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-pytestmark = [pytest.mark.needs_dbus, pytest.mark.needs_notification_daemon]
+pytestmark = pytest.mark.needs_dbus
 
 
 class TestCliIntegration:

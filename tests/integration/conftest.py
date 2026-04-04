@@ -6,24 +6,24 @@
 Environment requirements are expressed via pytest markers:
 
 - ``needs_dbus``: a D-Bus session bus must be reachable.
-- ``needs_notification_daemon``: a notification daemon must be
-  running on the session bus.
-
 The ``dbus_session`` fixture always launches a **private** bus so that
 test notifications never appear in the developer's notification bar.
-The ``notification_daemon`` fixture starts dunst on that private bus.
+The ``notification_daemon`` fixture runs a pure-Python mock daemon on
+that bus via dbus-fast — no external binaries beyond ``dbus-launch``.
 """
 
+import asyncio
 import os
 import shutil
 import signal
 import subprocess
-import time
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
 
 from terok_dbus import DbusNotifier, Notifier, create_notifier
+
+from .mock_daemon import start_mock_daemon
 
 
 def _has(binary: str) -> bool:
@@ -65,7 +65,7 @@ def dbus_session() -> Iterator[str]:
     if not bus_address:
         pytest.skip(f"dbus-launch did not provide DBUS_SESSION_BUS_ADDRESS: {proc.stdout!r}")
 
-    # Override the env for the entire test session so create_notifier()
+    # Override env for the entire test session so create_notifier()
     # connects to the private bus, not the user's desktop session.
     original = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
     os.environ["DBUS_SESSION_BUS_ADDRESS"] = bus_address
@@ -86,33 +86,18 @@ def dbus_session() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def notification_daemon(dbus_session: str) -> Iterator[None]:
-    """Start dunst on the private test bus.
+    """Run a pure-Python mock notification daemon on the private test bus.
 
-    Skips if dunst is not installed.
+    Uses dbus-fast to register as ``org.freedesktop.Notifications`` —
+    no external binaries needed.
     """
-    if not _has("dunst"):
-        pytest.skip(
-            "dunst not installed; install dunst or run via 'make test-matrix' for full coverage"
-        )
-
-    proc = subprocess.Popen(
-        ["dunst"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": dbus_session},
-    )
-    time.sleep(0.5)
-
-    if proc.poll() is not None:
-        pytest.skip("dunst failed to start")
+    loop = asyncio.new_event_loop()
+    bus, _daemon = loop.run_until_complete(start_mock_daemon(dbus_session))
 
     yield
 
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    bus.disconnect()
+    loop.close()
 
 
 @pytest.fixture

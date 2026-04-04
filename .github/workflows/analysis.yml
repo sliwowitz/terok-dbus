@@ -120,7 +120,7 @@ jobs:
         run: poetry self add "poetry-dynamic-versioning[plugin]==1.10.0"
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y dbus dbus-x11 dunst xvfb
+        run: sudo apt-get update && sudo apt-get install -y dbus dbus-x11
 
       - name: Install project dependencies
         run: poetry install --with test --no-interaction
@@ -129,9 +129,6 @@ jobs:
         run: |
           eval $(dbus-launch --sh-syntax)
           export DBUS_SESSION_BUS_ADDRESS
-          Xvfb :99 -screen 0 1024x768x24 &
-          export DISPLAY=:99
-          sleep 0.5
           make test-integration
           kill $DBUS_SESSION_BUS_PID 2>/dev/null || true
 

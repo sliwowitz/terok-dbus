@@ -12,7 +12,7 @@ import pytest
 
 from terok_dbus import DbusNotifier, Notifier, create_notifier
 
-pytestmark = [pytest.mark.needs_dbus, pytest.mark.needs_notification_daemon]
+pytestmark = pytest.mark.needs_dbus
 
 
 class TestNotifyLifecycle:

@@ -126,11 +126,6 @@ run_tests() {
 
                 echo \"--- dbus session: \$DBUS_SESSION_BUS_ADDRESS ---\"
 
-                # ── Start dunst (notification daemon) in the background ──
-                dunst &
-                DUNST_PID=\$!
-                sleep 0.5
-
                 # ── Python + Poetry setup ──
                 if command -v uv >/dev/null 2>&1; then
                     uv venv --python $PYTHON_VERSION .venv
@@ -177,7 +172,6 @@ run_tests() {
                 esac
 
                 # ── Cleanup ──
-                kill \$DUNST_PID 2>/dev/null || true
                 kill \$DBUS_SESSION_BUS_PID 2>/dev/null || true
             '
         "
