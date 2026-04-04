@@ -190,6 +190,7 @@ class TestShieldSubscriberIntegration:
         await asyncio.sleep(0.2)
 
         # Simulate operator clicking "Allow"
+        assert mock_notifier.on_action.call_args[0][0] == 1  # bound to notification id
         action_cb = mock_notifier.on_action.call_args[0][1]
         action_cb("accept")
         await asyncio.sleep(0.2)
@@ -268,6 +269,7 @@ class TestClearanceSubscriberIntegration:
         clearance_service.emit_request_received("req-11", PROJECT, TASK, DOMAIN_ALT, 443, REASON)
         await asyncio.sleep(0.2)
 
+        assert mock_notifier.on_action.call_args[0][0] == 1  # bound to notification id
         action_cb = mock_notifier.on_action.call_args[0][1]
         action_cb("deny")
         await asyncio.sleep(0.2)
