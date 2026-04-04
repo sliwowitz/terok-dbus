@@ -27,12 +27,13 @@ PYTHON_VERSION="3.12"
 if [[ -t 1 ]]; then
     C_BOLD='\033[1m'
     C_CYAN='\033[1;36m'
+    C_YELLOW='\033[1;33m'
     C_GREEN='\033[1;32m'
     C_RED='\033[1;31m'
     C_DIM='\033[2m'
     C_RESET='\033[0m'
 else
-    C_BOLD='' C_CYAN='' C_GREEN='' C_RED='' C_DIM='' C_RESET=''
+    C_BOLD='' C_CYAN='' C_YELLOW='' C_GREEN='' C_RED='' C_DIM='' C_RESET=''
 fi
 
 # Target distros: name -> Containerfile suffix
@@ -78,6 +79,27 @@ usage() {
     echo ""
     echo "Available distros: ${!DISTROS[*]}"
     return 0
+}
+
+warn_keyring() {
+    # Warn when the host's containers.conf does not disable kernel keyrings.
+    # Matrix runs cycle many containers and can exhaust the per-user 200-key
+    # quota, causing misleading "Disk quota exceeded" (EDQUOT) from crun.
+    local conf="${CONTAINERS_CONF:-}"
+    if [[ -z "$conf" ]]; then
+        for candidate in "$HOME/.config/containers/containers.conf" \
+                         /etc/containers/containers.conf; do
+            [[ -f "$candidate" ]] && conf="$candidate" && break
+        done
+    fi
+    if [[ -z "$conf" ]] || ! grep -qE '^\s*keyring\s*=\s*false' "$conf" 2>/dev/null; then
+        echo -e "${C_YELLOW}WARNING: kernel keyring is not disabled in containers.conf${C_RESET}"
+        echo -e "${C_YELLOW}  Matrix tests create many containers and may exhaust the per-user${C_RESET}"
+        echo -e "${C_YELLOW}  keyring quota (200 keys), causing spurious EDQUOT errors.${C_RESET}"
+        echo -e "${C_YELLOW}  Fix: add ${C_BOLD}[containers] keyring = false${C_YELLOW} to ~/.config/containers/containers.conf${C_RESET}"
+        echo -e "${C_YELLOW}  See: https://terok-ai.github.io/terok/kernel-keyring/${C_RESET}"
+        echo ""
+    fi
 }
 
 build_image() {
@@ -220,6 +242,8 @@ for target in "${TARGETS[@]}"; do
         exit 1
     fi
 done
+
+warn_keyring
 
 for target in "${TARGETS[@]}"; do
     build_image "$target"
