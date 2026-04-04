@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# Ubuntu 24.04 (Noble) — dbus + dunst, system Python 3.12
+FROM docker.io/library/ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dbus dbus-x11 dunst \
+    python3 python3-venv \
+    git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m testrunner
+WORKDIR /src

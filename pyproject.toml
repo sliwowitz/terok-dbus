@@ -61,6 +61,8 @@ addopts = "-v --tb=short"
 asyncio_mode = "auto"
 markers = [
   "integration: requires a running D-Bus session bus",
+  "needs_dbus: requires a D-Bus session bus on DBUS_SESSION_BUS_ADDRESS",
+  "needs_notification_daemon: requires a notification daemon (dunst) on the session bus",
 ]
 
 [tool.ruff]
