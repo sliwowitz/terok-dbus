@@ -69,16 +69,18 @@ async def _subscribe() -> None:
         level=logging.INFO,
     )
     notifier = await create_notifier()
-    subscriber = EventSubscriber(notifier)
-    await subscriber.start()
     try:
-        stop = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, stop.set)
-        await stop.wait()
+        subscriber = EventSubscriber(notifier)
+        await subscriber.start()
+        try:
+            stop = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, stop.set)
+            await stop.wait()
+        finally:
+            await subscriber.stop()
     finally:
-        await subscriber.stop()
         await notifier.disconnect()
 
 

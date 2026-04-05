@@ -3,8 +3,16 @@
 #
 # systemd user service for terok-dbus subscribe.
 #
+# The {{BIN}} placeholder is resolved at install time by the install
+# command (e.g. via sys.executable -m terok_dbus._cli) so the unit
+# works regardless of PATH — matching the pattern used by
+# terok-credential-proxy and terok-gate.
+#
 # Install:
-#   cp contrib/systemd/terok-dbus.service ~/.config/systemd/user/
+#   terok-dbus install-service   (when available)
+#   — or manually —
+#   sed "s|{{BIN}}|$(which terok-dbus)|" contrib/systemd/terok-dbus.service \
+#       > ~/.config/systemd/user/terok-dbus.service
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now terok-dbus
 #
@@ -19,8 +27,7 @@ Requires=dbus.socket
 
 [Service]
 Type=simple
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=terok-dbus subscribe
+ExecStart={{BIN}} subscribe
 Restart=on-failure
 RestartSec=5
 
