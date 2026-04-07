@@ -195,6 +195,7 @@ class EventSubscriber:
 
         if self._owns_bus and self._bus is not None:
             self._bus.disconnect()
+            self._bus = None
 
     # ── Instance discovery ────────────────────────────────────────────
 
@@ -241,6 +242,14 @@ class EventSubscriber:
                 self._known_clearances[name] = new_owner
             else:
                 self._known_clearances.pop(name, None)
+                stale = [
+                    rid for rid, sender in self._request_senders.items() if sender == old_owner
+                ]
+                for rid in stale:
+                    del self._request_senders[rid]
+                _log.info(
+                    "Clearance service disappeared: %s (cleaned %d pending)", name, len(stale)
+                )
 
     def _is_known_sender(self, sender: str, interface: str) -> bool:
         """Check if a signal sender is from a known bridge instance."""
@@ -263,8 +272,11 @@ class EventSubscriber:
             and msg.member == "NameOwnerChanged"
             and msg.sender == _DBUS_DEST
         ):
-            name, old_owner, new_owner = msg.body
-            self._on_name_owner_changed(name, old_owner, new_owner)
+            body = msg.body
+            if len(body) != 3 or not all(isinstance(part, str) for part in body):
+                _log.warning("Ignoring malformed NameOwnerChanged body: %r", body)
+                return
+            self._on_name_owner_changed(body[0], body[1], body[2])
             return
 
         # Shield1 signals
@@ -272,11 +284,11 @@ class EventSubscriber:
             if not self._is_known_sender(msg.sender, SHIELD_INTERFACE_NAME):
                 _log.debug("Ignoring Shield1 signal from unknown sender %s", msg.sender)
                 return
-            if msg.member == "ConnectionBlocked":
+            if msg.member == "ConnectionBlocked" and len(msg.body) == 6:
                 container, dest, port, proto, domain, request_id = msg.body
                 self._request_senders[request_id] = msg.sender
                 self._on_connection_blocked(container, dest, port, proto, domain, request_id)
-            elif msg.member == "VerdictApplied":
+            elif msg.member == "VerdictApplied" and len(msg.body) == 5:
                 self._on_verdict_applied(*msg.body)
             return
 
@@ -285,11 +297,10 @@ class EventSubscriber:
             if not self._is_known_sender(msg.sender, CLEARANCE_INTERFACE_NAME):
                 _log.debug("Ignoring Clearance1 signal from unknown sender %s", msg.sender)
                 return
-            if msg.member == "RequestReceived":
-                request_id = msg.body[0]
-                self._request_senders[request_id] = msg.sender
+            if msg.member == "RequestReceived" and len(msg.body) == 6:
+                self._request_senders[msg.body[0]] = msg.sender
                 self._on_request_received(*msg.body)
-            elif msg.member == "RequestResolved":
+            elif msg.member == "RequestResolved" and len(msg.body) == 3:
                 self._on_request_resolved(*msg.body)
 
     # ── Signal handlers (sync → async dispatch) ───────────────────────
