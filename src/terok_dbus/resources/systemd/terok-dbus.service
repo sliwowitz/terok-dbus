@@ -46,6 +46,14 @@ RestartSec=5
 # have.  Keep this empty until there's a documented win for a specific
 # directive that *doesn't* break podman.
 RestrictAddressFamilies=AF_UNIX
+# RestrictAddressFamilies implicitly sets NoNewPrivileges=yes (systemd.exec(5)
+# lists it alongside ProtectSystem, ProtectHome, PrivateDevices, etc. as
+# directives that imply NNP).  With NNP on, SELinux refuses the
+# unconfined_t → container_runtime_t transition that `podman unshare`
+# triggers, so verdict-apply fails with an `nnp_transition` AVC.  We want
+# the AF_UNIX restriction but NOT NNP, so override the implication
+# explicitly.
+NoNewPrivileges=no
 
 [Install]
 WantedBy=default.target
