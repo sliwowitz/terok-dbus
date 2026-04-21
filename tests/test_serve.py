@@ -200,6 +200,24 @@ class TestMakeEventSink:
         hub.ContainerStarted.assert_not_called()
         hub.ContainerExited.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("event_type", "hub_method"),
+        [
+            ("shield_up", "ShieldUp"),
+            ("shield_down", "ShieldDown"),
+            ("shield_down_all", "ShieldDownAll"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_shield_state_events_map_onto_hub_signals(
+        self, event_type: str, hub_method: str
+    ) -> None:
+        """Each shield_* reader event maps to exactly one hub signal method."""
+        hub = MagicMock()
+        sink = _serve._make_event_sink(hub)
+        await sink({"type": event_type, "container": "c1"})
+        getattr(hub, hub_method).assert_called_once_with("c1")
+
 
 class TestCleanupWithTimeout:
     """``_cleanup_with_timeout`` runs each stop step under a bounded timeout."""

@@ -57,6 +57,14 @@ class CallbackNotifier:
             care about container lifecycle skip the parameter.
         on_container_exited: Called for every ``ContainerExited`` signal
             with ``(container, reason)``.  Optional, same semantics.
+        on_shield_up: Called for every ``ShieldUp`` signal with the
+            container identifier.  Lets the TUI flip a "shielded" badge
+            on the per-container row without polling nft state.
+        on_shield_down: Called for every ``ShieldDown`` signal — partial
+            bypass (loopback-only traffic still allowed).
+        on_shield_down_all: Called for every ``ShieldDownAll`` signal —
+            unrestricted bypass.  Split from ``on_shield_down`` so the
+            consumer can render the two modes differently.
     """
 
     def __init__(
@@ -65,11 +73,17 @@ class CallbackNotifier:
         *,
         on_container_started: Callable[[str], None] | None = None,
         on_container_exited: Callable[[str, str], None] | None = None,
+        on_shield_up: Callable[[str], None] | None = None,
+        on_shield_down: Callable[[str], None] | None = None,
+        on_shield_down_all: Callable[[str], None] | None = None,
     ) -> None:
         """Bind optional notify and lifecycle callbacks."""
         self._on_notify = on_notify
         self._on_container_started = on_container_started
         self._on_container_exited = on_container_exited
+        self._on_shield_up = on_shield_up
+        self._on_shield_down = on_shield_down
+        self._on_shield_down_all = on_shield_down_all
         self._next_id = 1
         self._callbacks: dict[int, Callable[[str], None]] = {}
 
@@ -142,3 +156,18 @@ class CallbackNotifier:
         """Forward a ``ContainerExited`` lifecycle event to the consumer hook."""
         if self._on_container_exited:
             self._on_container_exited(container, reason)
+
+    def on_shield_up(self, container: str) -> None:
+        """Forward a ``ShieldUp`` signal to the consumer hook."""
+        if self._on_shield_up:
+            self._on_shield_up(container)
+
+    def on_shield_down(self, container: str) -> None:
+        """Forward a ``ShieldDown`` signal (partial bypass) to the consumer hook."""
+        if self._on_shield_down:
+            self._on_shield_down(container)
+
+    def on_shield_down_all(self, container: str) -> None:
+        """Forward a ``ShieldDownAll`` signal (full bypass) to the consumer hook."""
+        if self._on_shield_down_all:
+            self._on_shield_down_all(container)

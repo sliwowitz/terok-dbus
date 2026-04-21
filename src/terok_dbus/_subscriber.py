@@ -315,6 +315,18 @@ class EventSubscriber:
             container, reason = msg.body
             _log.info("Container exited: %s (reason=%s)", container, reason)
             self._dispatch_lifecycle("on_container_exited", container, reason)
+        elif msg.member == "ShieldUp" and len(msg.body) == 1:
+            (container,) = msg.body
+            _log.info("Shield up: %s", container)
+            self._dispatch_lifecycle("on_shield_up", container)
+        elif msg.member in {"ShieldDown", "ShieldDownAll"} and len(msg.body) == 1:
+            (container,) = msg.body
+            allow_all = msg.member == "ShieldDownAll"
+            _log.info("Shield down: %s (allow_all=%s)", container, allow_all)
+            self._dispatch(self._handle_shield_down(container))
+            self._dispatch_lifecycle(
+                "on_shield_down_all" if allow_all else "on_shield_down", container
+            )
 
     def _on_clearance_signal(self, msg: Message) -> None:
         """Dispatch Clearance1 signals after validating the sender."""
@@ -420,6 +432,29 @@ class EventSubscriber:
             container_id=pending.container,
             container_name=name,
         )
+
+    async def _handle_shield_down(self, container: str) -> None:
+        """Close pending block notifications for *container* — shield is off.
+
+        While shield is in bypass, any block we previously asked the operator
+        to clear is stale: traffic is flowing already, so clicking Allow/Deny
+        would write into an allowlist nobody is consulting right now.  We
+        drop the pending record and close the on-screen notification rather
+        than leaving a ghost button alive.  ``ShieldUp`` doesn't need a
+        companion — when shield comes back the next block triggers a fresh
+        ``ConnectionBlocked`` and the whole flow starts over.
+        """
+        stale = [pending for pending in self._pending.values() if pending.container == container]
+        for pending in stale:
+            self._pending.pop(pending.request_id, None)
+            try:
+                await self._notifier.close(pending.notification_id)
+            except Exception:
+                _log.exception(
+                    "Failed to close stale notification %d for %s",
+                    pending.notification_id,
+                    container,
+                )
 
     async def _send_verdict(self, container: str, request_id: str, dest: str, action: str) -> None:
         """Call ``Verdict`` on the hub (``org.terok.Shield1`` well-known name)."""

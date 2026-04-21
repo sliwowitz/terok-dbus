@@ -100,6 +100,20 @@ class TestCallbackNotifier:
         notifier = CallbackNotifier()
         notifier.on_container_started("abc123")  # must not raise
         notifier.on_container_exited("abc123", "poststop")  # must not raise
+        notifier.on_shield_up("abc123")  # must not raise
+        notifier.on_shield_down("abc123")  # must not raise
+        notifier.on_shield_down_all("abc123")  # must not raise
+
+    @pytest.mark.parametrize(
+        "kwarg",
+        ["on_shield_up", "on_shield_down", "on_shield_down_all"],
+    )
+    def test_shield_state_hooks_forward_to_consumer(self, kwarg: str) -> None:
+        """Each shield-state hook is invoked with just the container id when bound."""
+        hook = Mock()
+        notifier = CallbackNotifier(**{kwarg: hook})
+        getattr(notifier, kwarg)("abc123")
+        hook.assert_called_once_with("abc123")
 
 
 class TestNotification:

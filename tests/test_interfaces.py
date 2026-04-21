@@ -108,6 +108,15 @@ class TestShieldXml:
         args = [(a.name, a.signature) for a in signals["ContainerExited"].args]
         assert args == [("container", "s"), ("reason", "s")]
 
+    def test_shield_state_signals(self) -> None:
+        """ShieldUp / ShieldDown / ShieldDownAll all carry just the container id."""
+        iface = Node.parse(SHIELD_XML).interfaces[0]
+        signals = {s.name: s for s in iface.signals}
+        for member in ("ShieldUp", "ShieldDown", "ShieldDownAll"):
+            assert member in signals, f"missing Shield1.{member} signal"
+            args = [(a.name, a.signature) for a in signals[member].args]
+            assert args == [("container", "s")]
+
 
 class TestClearanceXml:
     """Clearance1 introspection XML parses correctly."""

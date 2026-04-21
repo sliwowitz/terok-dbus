@@ -50,6 +50,15 @@ SHIELD_XML = """\
       <arg name="container"  type="s"/>
       <arg name="reason"     type="s"/>
     </signal>
+    <signal name="ShieldUp">
+      <arg name="container"  type="s"/>
+    </signal>
+    <signal name="ShieldDown">
+      <arg name="container"  type="s"/>
+    </signal>
+    <signal name="ShieldDownAll">
+      <arg name="container"  type="s"/>
+    </signal>
     <method name="Verdict">
       <arg name="container"  type="s" direction="in"/>
       <arg name="request_id" type="s" direction="in"/>
