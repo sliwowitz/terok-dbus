@@ -26,6 +26,8 @@ import contextlib
 import json
 import logging
 import os
+import stat
+import struct
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -73,15 +75,45 @@ class EventIngester:
         self._clients: set[asyncio.Task] = set()
 
     async def start(self) -> None:
-        """Bind the socket and start accepting connections in the background."""
+        """Bind the socket and start accepting connections in the background.
+
+        Hardens the bind in three places: the parent directory is owned by
+        the current uid and mode-``0700`` before we touch it; the socket
+        itself is created under a ``0177`` umask so it's already mode
+        ``0600`` the moment ``bind()`` returns (no TOCTOU window); and we
+        ``lstat`` the path afterwards to confirm it's actually a socket —
+        a symlink swap between unlink and bind would otherwise let a peer
+        redirect our ``os.chmod`` at an arbitrary file.
+        """
+        self._ensure_private_parent()
         with contextlib.suppress(FileNotFoundError):
             self._socket_path.unlink()
-        self._socket_path.parent.mkdir(parents=True, exist_ok=True)
-        self._server = await asyncio.start_unix_server(
-            self._handle_client, path=str(self._socket_path)
-        )
-        os.chmod(self._socket_path, 0o600)  # noqa: S103
+        old_umask = os.umask(0o177)
+        try:
+            self._server = await asyncio.start_unix_server(
+                self._handle_client, path=str(self._socket_path)
+            )
+        finally:
+            os.umask(old_umask)
+        lst = os.lstat(self._socket_path)
+        if not stat.S_ISSOCK(lst.st_mode):
+            raise RuntimeError(f"ingester path is not a socket after bind: {self._socket_path}")
         _log.info("event ingester listening on %s", self._socket_path)
+
+    def _ensure_private_parent(self) -> None:
+        """Refuse to bind under a parent dir that isn't owned by us + mode 0700-ish."""
+        parent = self._socket_path.parent
+        parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        st = parent.stat()
+        if st.st_uid != os.getuid():
+            raise RuntimeError(
+                f"ingester parent dir not owned by current uid: {parent} (owner uid={st.st_uid})"
+            )
+        if st.st_mode & 0o077:
+            raise RuntimeError(
+                f"ingester parent dir is group/world accessible: "
+                f"{parent} (mode={oct(st.st_mode & 0o777)})"
+            )
 
     async def stop(self) -> None:
         """Close the server and await any in-flight client tasks."""
@@ -115,6 +147,9 @@ class EventIngester:
         if task is not None:
             self._clients.add(task)
         try:
+            if not _peer_uid_matches_ours(writer):
+                _log.warning("ingester: rejecting connection from foreign uid")
+                return
             while True:
                 line = await reader.readline()
                 if not line:
@@ -144,3 +179,32 @@ class EventIngester:
             await self._on_event(event)
         except Exception as exc:  # noqa: BLE001
             _log.warning("ingester: sink raised %s on %r", exc, event)
+
+
+# ``struct ucred { pid_t pid; uid_t uid; gid_t gid; }`` on Linux — three
+# native ints.  SO_PEERCRED on an AF_UNIX socket returns this as an opaque
+# byte buffer that we unpack here.
+_UCRED_FORMAT = "3i"
+_UCRED_SIZE = struct.calcsize(_UCRED_FORMAT)
+
+
+def _peer_uid_matches_ours(writer: asyncio.StreamWriter) -> bool:
+    """Check via ``SO_PEERCRED`` that the peer runs as our uid.
+
+    The ingester socket lives in ``$XDG_RUNTIME_DIR`` which should already
+    be per-user, but a hostile same-uid process (shell, browser, sandbox
+    escape) can still connect.  ``SO_PEERCRED`` is the kernel-authenticated
+    caller identity — anything else is guessing.
+    """
+    import socket as _socket
+
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        _log.warning("ingester: accepted connection exposes no socket; refusing")
+        return False
+    try:
+        raw = sock.getsockopt(_socket.SOL_SOCKET, _socket.SO_PEERCRED, _UCRED_SIZE)
+    except (OSError, AttributeError):
+        return False
+    _pid, uid, _gid = struct.unpack(_UCRED_FORMAT, raw)
+    return uid == os.getuid()

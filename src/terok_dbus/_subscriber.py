@@ -267,8 +267,21 @@ class EventSubscriber:
             self._on_clearance_signal(msg)
 
     def _on_shield_signal(self, msg: Message) -> None:
-        """Dispatch Shield1 signals by member name, rejecting spoofed senders."""
-        if self._shield_owner is not None and msg.sender != self._shield_owner:
+        """Dispatch Shield1 signals by member name, rejecting spoofed senders.
+
+        Fail closed: until we know who owns ``org.terok.Shield1``, every
+        signal on that interface is refused.  Accepting signals with
+        ``_shield_owner is None`` would let a same-session peer race the
+        hub's startup and drive the subscriber's state machine before we
+        ever learn whose messages to trust.
+        """
+        if self._shield_owner is None:
+            _log.debug(
+                "Dropping Shield1 signal from %s — hub owner not yet known",
+                msg.sender,
+            )
+            return
+        if msg.sender != self._shield_owner:
             _log.debug("Ignoring Shield1 signal from unknown sender %s", msg.sender)
             return
         if msg.member == "ConnectionBlocked" and len(msg.body) == 6:

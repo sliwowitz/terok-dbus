@@ -118,6 +118,57 @@ class TestEventIngester:
         finally:
             await ingester.stop()
 
+    async def test_socket_lands_with_restrictive_mode(self, tmp_path: Path) -> None:
+        """Bind must produce a 0600 socket with no TOCTOU widening window."""
+        import os
+        import stat
+
+        socket_path = tmp_path / "events.sock"
+        ingester = EventIngester(socket_path=socket_path, on_event=lambda _event: _noop())
+        await ingester.start()
+        try:
+            mode = stat.S_IMODE(os.stat(socket_path).st_mode)
+        finally:
+            await ingester.stop()
+        assert mode & 0o077 == 0, f"socket ended up group/other accessible: {oct(mode)}"
+
+    async def test_start_refuses_world_writable_parent(self, tmp_path: Path) -> None:
+        """A parent dir mode 0777 is refused — no binding under a shared directory."""
+        import os
+
+        exposed = tmp_path / "exposed"
+        exposed.mkdir(mode=0o777)
+        # mkdir() respects umask; force the mode explicitly.
+        os.chmod(exposed, 0o777)
+        socket_path = exposed / "events.sock"
+        ingester = EventIngester(socket_path=socket_path, on_event=lambda _event: _noop())
+        with pytest.raises(RuntimeError, match="group/world accessible"):
+            await ingester.start()
+
+    async def test_foreign_peer_uid_is_rejected(self, tmp_path: Path) -> None:
+        """SO_PEERCRED mismatch drops the connection without dispatching."""
+        from unittest.mock import patch
+
+        received: list[dict] = []
+
+        async def sink(event: dict) -> None:
+            received.append(event)
+
+        socket_path = tmp_path / "events.sock"
+        ingester = EventIngester(socket_path=socket_path, on_event=sink)
+        await ingester.start()
+        try:
+            with patch("terok_dbus._event_ingester._peer_uid_matches_ours", return_value=False):
+                await _connect_and_send(
+                    socket_path,
+                    (json.dumps({"type": "container_started", "container": "c"}) + "\n").encode(),
+                )
+                for _ in range(20):
+                    await asyncio.sleep(0.01)
+        finally:
+            await ingester.stop()
+        assert received == []
+
 
 async def _noop() -> None:
     """Awaitable no-op sink used where the test doesn't inspect events."""

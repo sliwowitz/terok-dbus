@@ -23,7 +23,7 @@ from terok_dbus._interfaces import (
 from terok_dbus._subscriber import EventSubscriber
 from tests.conftest import CONTAINER, DEST_IP, DOMAIN
 
-_HUB_UNIQUE = ":1.42"
+_HUB_UNIQUE = ":1.77"
 _REQUEST_ID = f"{CONTAINER}:1"
 
 
@@ -54,7 +54,7 @@ def _connection_blocked_signal(request_id: str = _REQUEST_ID) -> Message:
     """Construct a Shield1.ConnectionBlocked signal as the reader would emit it."""
     return Message(
         message_type=MessageType.SIGNAL,
-        sender=":1.77",
+        sender=_HUB_UNIQUE,
         path=SHIELD_OBJECT_PATH,
         interface=SHIELD_INTERFACE_NAME,
         member="ConnectionBlocked",
@@ -117,6 +117,7 @@ class TestShieldSignals:
         bus = _mock_bus()
         sub = EventSubscriber(mock_notifier, bus=bus)
         sub._bus = bus
+        sub._shield_owner = ":1.77"
         sub._on_message(_connection_blocked_signal())
         await asyncio.sleep(0)
         mock_notifier.notify.assert_awaited_once()
@@ -130,6 +131,7 @@ class TestShieldSignals:
         bus = _mock_bus()
         sub = EventSubscriber(mock_notifier, bus=bus)
         sub._bus = bus
+        sub._shield_owner = _HUB_UNIQUE
         sub._on_message(_connection_blocked_signal())
         await asyncio.sleep(0)
         sub._on_message(_verdict_applied_signal(action="allow", ok=True))
@@ -143,6 +145,7 @@ class TestShieldSignals:
     async def test_container_started_signal_is_logged_no_op(self, mock_notifier: AsyncMock) -> None:
         bus = _mock_bus()
         sub = EventSubscriber(mock_notifier, bus=bus)
+        sub._shield_owner = ":1.77"
         started = Message(
             message_type=MessageType.SIGNAL,
             sender=":1.77",
@@ -177,6 +180,18 @@ class TestShieldSignals:
         spoofed = _connection_blocked_signal()
         spoofed.sender = ":1.999"  # unrelated peer
         sub._on_message(spoofed)
+        await asyncio.sleep(0)
+        mock_notifier.notify.assert_not_called()
+        assert sub._pending == {}
+
+    @pytest.mark.asyncio
+    async def test_shield_signal_dropped_when_owner_unknown(self, mock_notifier: AsyncMock) -> None:
+        """Pre-seed-owner signals (startup race / hub down) must be refused."""
+        bus = _mock_bus()
+        sub = EventSubscriber(mock_notifier, bus=bus)
+        sub._bus = bus
+        assert sub._shield_owner is None
+        sub._on_message(_connection_blocked_signal())
         await asyncio.sleep(0)
         mock_notifier.notify.assert_not_called()
         assert sub._pending == {}
@@ -217,6 +232,7 @@ class TestSendVerdict:
         bus = _mock_bus()
         sub = EventSubscriber(mock_notifier, bus=bus)
         sub._bus = bus
+        sub._shield_owner = ":1.77"
         sub._on_message(_connection_blocked_signal())
         await asyncio.sleep(0)
         mock_notifier.on_action.assert_awaited_once()
