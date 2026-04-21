@@ -51,7 +51,10 @@ class DbusNotifier:
                     iface.on_action_invoked(self._handle_action)
                 if hasattr(iface, "on_notification_closed"):
                     iface.on_notification_closed(self._handle_closed)
-            except Exception:
+            except BaseException:
+                # Catch ``BaseException`` so an ``asyncio.CancelledError``
+                # (``BaseException`` subclass on 3.11+) mid-handshake doesn't
+                # leak the already-connected bus.
                 bus.disconnect()
                 raise
             self._bus = bus

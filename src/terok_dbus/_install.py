@@ -43,20 +43,7 @@ def install_service(bin_path: Path | str) -> Path:
         The on-disk path the unit was written to.
     """
     template = _read_template()
-    # ``{{BIN}}`` ends up on an ``ExecStart=`` line, which systemd tokenises
-    # with POSIX-shell rules.  Two shapes are expected:
-    #
-    #   * Single absolute path from ``shutil.which("terok-dbus")`` — no
-    #     embedded spaces on any standard install layout (pipx/system pkg).
-    #   * Multi-token ``"/usr/bin/python -m terok_dbus._cli"`` — already
-    #     space-separated tokens, correct for ``ExecStart=`` as-is.
-    #
-    # Neither needs extra quoting.  Refuse obviously awkward values (quotes,
-    # newlines) rather than emit an unreadable unit file.
-    bin_str = str(bin_path)
-    if any(ch in bin_str for ch in ('"', "'", "\n", "\r")):
-        raise ValueError(f"bin_path is not safe to embed in ExecStart=: {bin_str!r}")
-    rendered = template.replace("{{BIN}}", bin_str)
+    rendered = template.replace("{{BIN}}", _render_exec_start(str(bin_path)))
     rendered = _inject_state_dir_env(rendered, os.environ.get(STATE_DIR_ENV))
     dest = _user_systemd_dir() / UNIT_NAME
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -75,8 +62,9 @@ def _inject_state_dir_env(rendered: str, state_dir: str | None) -> str:
     """
     if not state_dir:
         return rendered
+    quoted = _systemd_quote(state_dir)
     marker = f"# injected-at-install: {STATE_DIR_ENV}={state_dir}\n"
-    env_line = f"Environment={STATE_DIR_ENV}={state_dir}\n"
+    env_line = f'Environment="{STATE_DIR_ENV}={quoted}"\n'
     lines = rendered.splitlines(keepends=True)
     result: list[str] = []
     injected = False
@@ -87,6 +75,33 @@ def _inject_state_dir_env(rendered: str, state_dir: str | None) -> str:
             result.append(env_line)
             injected = True
     return "".join(result)
+
+
+def _render_exec_start(bin_path: str) -> str:
+    """Prepare a ``{{BIN}}`` substitution value suitable for ``ExecStart=``.
+
+    Two shapes reach this helper by design:
+     * a single absolute path such as ``shutil.which("terok-dbus")`` — possibly
+       containing spaces if the operator installed into an unusual location;
+     * a multi-token fallback such as ``/usr/bin/python -m terok_dbus._cli``
+       produced when ``terok-dbus`` isn't on ``PATH``.
+
+    The single-path case gets wrapped in systemd quotes so a space in the
+    path doesn't get tokenised into separate arguments.  The multi-token
+    case is passed through — its whitespace is meaningful.  In both cases
+    literal double quotes and backslashes are escaped so the resulting line
+    is round-trippable.
+    """
+    if any(ch in bin_path for ch in ("\n", "\r")):
+        raise ValueError(f"bin_path is not safe to embed in ExecStart=: {bin_path!r}")
+    if bin_path.startswith("/") and " " in bin_path and " -" not in bin_path:
+        return f'"{_systemd_quote(bin_path)}"'
+    return bin_path
+
+
+def _systemd_quote(value: str) -> str:
+    """Escape ``"`` and ``\\`` so *value* can live safely inside a quoted string."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _read_template() -> str:
@@ -135,12 +150,21 @@ def read_installed_unit() -> str | None:
 def extract_baked_state_dir(unit_text: str) -> str | None:
     """Pull the baked ``TEROK_SHIELD_STATE_DIR`` out of an installed unit's text.
 
-    Returns ``None`` when no ``Environment=TEROK_SHIELD_STATE_DIR=...``
-    line is present.
+    Handles both the plain ``Environment=VAR=value`` and the
+    ``Environment="VAR=value with spaces"`` forms the installer may emit.
+    Returns ``None`` when no matching line is present.
     """
-    needle = f"Environment={STATE_DIR_ENV}="
     for line in unit_text.splitlines():
         stripped = line.strip()
-        if stripped.startswith(needle):
-            return stripped[len(needle) :]
+        for prefix in (
+            f'Environment="{STATE_DIR_ENV}=',
+            f"Environment={STATE_DIR_ENV}=",
+        ):
+            if stripped.startswith(prefix):
+                value = stripped[len(prefix) :]
+                if prefix.endswith('"'):
+                    pass  # prefix already consumed the opening quote
+                if value.endswith('"'):
+                    value = value[:-1]
+                return value.replace('\\"', '"').replace("\\\\", "\\")
     return None

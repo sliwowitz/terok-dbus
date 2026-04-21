@@ -133,6 +133,10 @@ class EventSubscriber:
         self._clearance_pending: dict[int, str] = {}
         # For Clearance1: legacy per-sender routing (unchanged).
         self._clearance_senders: dict[str, str] = {}
+        # Current unique name of whichever process owns ``org.terok.Shield1`` —
+        # any same-session peer could otherwise spoof Shield1 signals onto our
+        # state machine.  Tracked via NameOwnerChanged; seeded at startup.
+        self._shield_owner: str | None = None
         # Match rules for cleanup
         self._match_rules: list[str] = []
         # Background verdict/resolve tasks
@@ -145,12 +149,24 @@ class EventSubscriber:
         if self._bus is None:
             self._bus = await MessageBus().connect()
 
-        # Shield1: senderless match on the single unified interface.
+        # Shield1: interface-level match (the sender-filter happens at dispatch
+        # time against ``_shield_owner`` so we can swap-in a restarted hub
+        # without re-issuing the match rule).
         shield_rule = (
             f"type='signal',interface='{SHIELD_INTERFACE_NAME}',path='{SHIELD_OBJECT_PATH}'"
         )
         await _add_match(self._bus, shield_rule)
         self._match_rules.append(shield_rule)
+
+        # Shield1: track owner via NameOwnerChanged so spoofed signals from
+        # other session peers are rejected in ``_on_shield_signal``.
+        shield_noc_rule = (
+            f"type='signal',sender='{_DBUS_DEST}',path='{_DBUS_PATH}',"
+            f"interface='{_DBUS_IFACE}',member='NameOwnerChanged',"
+            f"arg0='{SHIELD_BUS_NAME}'"
+        )
+        await _add_match(self._bus, shield_noc_rule)
+        self._match_rules.append(shield_noc_rule)
 
         # Clearance1: legacy senderless + NameOwnerChanged routing.
         clearance_rule = (
@@ -168,15 +184,27 @@ class EventSubscriber:
         self._match_rules.append(clearance_noc_rule)
 
         self._bus.add_message_handler(self._on_message)
-        # If the clearance service was already running at startup, NameOwnerChanged
-        # won't fire — seed the registry with its current owner (if any).
+        # If the clearance or hub service is already running at startup,
+        # NameOwnerChanged won't fire — seed the owner registries from the
+        # bus's current name table.
         await self._seed_clearance_owner()
+        await self._seed_shield_owner()
         _log.info("Subscribed to %s and %s", SHIELD_INTERFACE_NAME, CLEARANCE_INTERFACE_NAME)
 
     async def _seed_clearance_owner(self) -> None:
         """Populate the Clearance sender registry from the bus's current name table."""
+        owner = await self._lookup_name_owner(CLEARANCE_BUS_NAME)
+        if owner is not None:
+            self._clearance_senders[CLEARANCE_BUS_NAME] = owner
+
+    async def _seed_shield_owner(self) -> None:
+        """Populate the hub-owner record from the bus's current name table."""
+        self._shield_owner = await self._lookup_name_owner(SHIELD_BUS_NAME)
+
+    async def _lookup_name_owner(self, bus_name: str) -> str | None:
+        """Ask the bus for ``bus_name``'s current unique-name owner, or ``None``."""
         if self._bus is None:
-            return
+            return None
         try:
             reply = await self._bus.call(
                 Message(
@@ -185,13 +213,12 @@ class EventSubscriber:
                     interface=_DBUS_IFACE,
                     member="GetNameOwner",
                     signature="s",
-                    body=[CLEARANCE_BUS_NAME],
+                    body=[bus_name],
                 )
             )
         except Exception:
-            return  # Name not owned yet — NameOwnerChanged will pick it up later.
-        if reply.body:
-            self._clearance_senders[CLEARANCE_BUS_NAME] = reply.body[0]
+            return None  # Not owned yet — NameOwnerChanged will pick it up later.
+        return reply.body[0] if reply.body else None
 
     async def stop(self) -> None:
         """Unsubscribe, disconnect the bus if owned, and cancel pending tasks."""
@@ -209,6 +236,7 @@ class EventSubscriber:
         self._pending.clear()
         self._clearance_pending.clear()
         self._clearance_senders.clear()
+        self._shield_owner = None
 
         if self._owns_bus and self._bus is not None:
             self._bus.disconnect()
@@ -239,7 +267,10 @@ class EventSubscriber:
             self._on_clearance_signal(msg)
 
     def _on_shield_signal(self, msg: Message) -> None:
-        """Dispatch Shield1 signals by member name."""
+        """Dispatch Shield1 signals by member name, rejecting spoofed senders."""
+        if self._shield_owner is not None and msg.sender != self._shield_owner:
+            _log.debug("Ignoring Shield1 signal from unknown sender %s", msg.sender)
+            return
         if msg.member == "ConnectionBlocked" and len(msg.body) == 6:
             container, request_id, dest, port, proto, domain = msg.body
             self._dispatch(
@@ -264,12 +295,14 @@ class EventSubscriber:
             self._dispatch(self._handle_request_resolved(*msg.body))
 
     def _on_name_owner_changed(self, name: str, _old_owner: str, new_owner: str) -> None:
-        """Track the Clearance1 service's current owner — Shield1 is senderless."""
+        """Track the current owner of the two well-known bus names we care about."""
         if name == CLEARANCE_BUS_NAME:
             if new_owner:
                 self._clearance_senders[name] = new_owner
             else:
                 self._clearance_senders.pop(name, None)
+        elif name == SHIELD_BUS_NAME:
+            self._shield_owner = new_owner or None
 
     # ── Shield1 signal logic ──────────────────────────────────────────
 
@@ -316,12 +349,13 @@ class EventSubscriber:
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        verb = "Allow" if action == "allow" else "Deny"
+        success_titles = {"allow": "Allowed", "deny": "Denied"}
+        failure_titles = {"allow": "Allow failed", "deny": "Deny failed"}
         if ok:
-            title = f"{verb}ed: {pending.dest}"
+            title = f"{success_titles.get(action, action.title())}: {pending.dest}"
             hints = _HINT_RESOLVED
         else:
-            title = f"{verb} failed: {pending.dest}"
+            title = f"{failure_titles.get(action, action.title() + ' failed')}: {pending.dest}"
             hints = _HINT_VERDICT_FAILED
         await self._notifier.notify(
             title,

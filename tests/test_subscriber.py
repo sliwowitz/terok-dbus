@@ -102,7 +102,7 @@ class TestStart:
         ):
             await sub.start()
             await sub.stop()
-        assert remove_match.call_count == 3
+        assert remove_match.call_count == 4
         bus.remove_message_handler.assert_called_once()
 
 
@@ -166,6 +166,31 @@ class TestShieldSignals:
         sub._on_message(non_signal)
         await asyncio.sleep(0)
         mock_notifier.notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_spoofed_shield_signal_is_dropped(self, mock_notifier: AsyncMock) -> None:
+        """Once the hub owner is known, signals from other senders don't drive state."""
+        bus = _mock_bus()
+        sub = EventSubscriber(mock_notifier, bus=bus)
+        sub._bus = bus
+        sub._shield_owner = ":1.77"  # the legitimate hub
+        spoofed = _connection_blocked_signal()
+        spoofed.sender = ":1.999"  # unrelated peer
+        sub._on_message(spoofed)
+        await asyncio.sleep(0)
+        mock_notifier.notify.assert_not_called()
+        assert sub._pending == {}
+
+    @pytest.mark.asyncio
+    async def test_name_owner_changed_tracks_shield_owner(self, mock_notifier: AsyncMock) -> None:
+        """NameOwnerChanged events keep ``_shield_owner`` current."""
+        from terok_dbus._interfaces import SHIELD_BUS_NAME
+
+        sub = EventSubscriber(mock_notifier, bus=_mock_bus())
+        sub._on_name_owner_changed(SHIELD_BUS_NAME, "", ":1.77")
+        assert sub._shield_owner == ":1.77"
+        sub._on_name_owner_changed(SHIELD_BUS_NAME, ":1.77", "")
+        assert sub._shield_owner is None
 
 
 # ── Verdict routing ───────────────────────────────────────────────────

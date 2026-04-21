@@ -76,7 +76,7 @@ class TestStateDirEnvBaking:
         with patch.object(_install, "_daemon_reload"):
             dest = install_service("/a/terok-dbus")
         body = dest.read_text()
-        assert "Environment=TEROK_SHIELD_STATE_DIR=/custom/state" in body
+        assert 'Environment="TEROK_SHIELD_STATE_DIR=/custom/state"' in body
 
     def test_baked_env_lands_after_execstart(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -89,7 +89,9 @@ class TestStateDirEnvBaking:
         lines = dest.read_text().splitlines()
         exec_idx = next(i for i, line in enumerate(lines) if line.startswith("ExecStart="))
         env_idx = next(
-            i for i, line in enumerate(lines) if "Environment=TEROK_SHIELD_STATE_DIR=" in line
+            i
+            for i, line in enumerate(lines)
+            if "TEROK_SHIELD_STATE_DIR=" in line and "Environment" in line
         )
         assert env_idx == exec_idx + 2
 
