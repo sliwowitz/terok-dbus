@@ -32,23 +32,10 @@ class DbusNotifier:
         self._connect_lock = asyncio.Lock()
 
     async def connect(self) -> None:
-        """Idempotently establish the session-bus connection.
+        """Idempotently open the session-bus connection and subscribe to signals.
 
-        Callers who want to verify Notifications is reachable ahead of
-        time (e.g. the hub's startup probe) invoke this directly and
-        handle the exception themselves; ``notify()`` lazy-connects via
-        the same path on first use.  Concurrent calls are safe —
-        subsequent callers observe the already-connected state under
-        the same lock and return without opening a second MessageBus.
-        """
-        await self._connect()
-
-    async def _connect(self) -> None:
-        """Open and register the bus, guarded against concurrent callers.
-
-        The lock serialises racing ``connect()`` / ``notify()`` calls so
-        exactly one MessageBus is created; a repeat caller sees
-        ``self._interface`` already set and returns early.
+        Safe to call concurrently and repeatedly: the lock serialises racing
+        callers so exactly one MessageBus is ever created for this notifier.
         """
         if self._interface is not None:
             return
@@ -104,7 +91,7 @@ class DbusNotifier:
         Returns:
             Server-assigned notification ID.
         """
-        await self._connect()
+        await self.connect()
 
         actions_flat: list[str] = []
         for action_id, label in actions:
@@ -146,13 +133,13 @@ class DbusNotifier:
 
     async def disconnect(self) -> None:
         """Tear down the session-bus connection."""
-        if self._interface is not None:
-            if hasattr(self._interface, "off_action_invoked"):
-                self._interface.off_action_invoked(self._handle_action)
-            if hasattr(self._interface, "off_notification_closed"):
-                self._interface.off_notification_closed(self._handle_closed)
-        if self._bus is not None:
-            self._bus.disconnect()
+        if self._interface is None:
+            return
+        if hasattr(self._interface, "off_action_invoked"):
+            self._interface.off_action_invoked(self._handle_action)
+        if hasattr(self._interface, "off_notification_closed"):
+            self._interface.off_notification_closed(self._handle_closed)
+        self._bus.disconnect()  # type: ignore[union-attr]
         self._bus = None
         self._interface = None
         self._callbacks.clear()

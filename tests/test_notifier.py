@@ -48,7 +48,7 @@ class TestDbusNotifierConnect:
     async def test_connect_subscribes_to_signals(self, mock_bus: MagicMock):
         with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus):
             notifier = DbusNotifier()
-            await notifier._connect()
+            await notifier.connect()
             iface = mock_bus.get_proxy_object.return_value.get_interface.return_value
             iface.on_action_invoked.assert_called_once_with(notifier._handle_action)
             iface.on_notification_closed.assert_called_once_with(notifier._handle_closed)
@@ -56,7 +56,7 @@ class TestDbusNotifierConnect:
     async def test_disconnect_clears_state(self, mock_bus: MagicMock):
         with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus):
             notifier = DbusNotifier()
-            await notifier._connect()
+            await notifier.connect()
             await notifier.disconnect()
             assert notifier._bus is None
             assert notifier._interface is None
@@ -65,7 +65,7 @@ class TestDbusNotifierConnect:
     async def test_disconnect_unsubscribes_signals(self, mock_bus: MagicMock):
         with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus):
             notifier = DbusNotifier()
-            await notifier._connect()
+            await notifier.connect()
             iface = mock_bus.get_proxy_object.return_value.get_interface.return_value
             await notifier.disconnect()
             iface.off_action_invoked.assert_called_once_with(notifier._handle_action)
@@ -76,30 +76,13 @@ class TestDbusNotifierConnect:
         with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus):
             notifier = DbusNotifier()
             with pytest.raises(RuntimeError, match="boom"):
-                await notifier._connect()
+                await notifier.connect()
             mock_bus.disconnect.assert_called_once()
             assert notifier._bus is None
             assert notifier._interface is None
 
-    async def test_second_connect_is_noop(self, mock_bus: MagicMock):
-        """``connect()`` after a successful connect must not reopen the bus."""
-        with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus) as cls:
-            notifier = DbusNotifier()
-            await notifier.connect()
-            await notifier.connect()
-        assert cls.call_count == 1
-        mock_bus.connect.assert_awaited_once()
-
-    async def test_concurrent_connect_opens_one_bus(self, mock_bus: MagicMock):
-        """Racing ``connect()`` callers must serialise on the shared lock."""
-        with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus) as cls:
-            notifier = DbusNotifier()
-            await asyncio.gather(notifier.connect(), notifier.connect(), notifier.connect())
-        assert cls.call_count == 1
-        mock_bus.connect.assert_awaited_once()
-
     async def test_connect_and_notify_share_the_lock(self, mock_bus: MagicMock):
-        """A ``connect()`` + ``notify()`` race must also produce one MessageBus."""
+        """A ``connect()`` + ``notify()`` race must produce exactly one MessageBus."""
         with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus) as cls:
             notifier = DbusNotifier()
             await asyncio.gather(notifier.connect(), notifier.notify("hi"))
@@ -198,7 +181,7 @@ class TestDbusNotifierActions:
     async def test_close_removes_callback_and_calls_dbus(self, mock_bus: MagicMock):
         with patch("terok_dbus._notifier.MessageBus", return_value=mock_bus):
             notifier = DbusNotifier()
-            await notifier._connect()
+            await notifier.connect()
             await notifier.on_action(7, MagicMock())
             await notifier.close(7)
             assert 7 not in notifier._callbacks
