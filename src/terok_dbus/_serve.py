@@ -174,6 +174,21 @@ def _emit_container_exited(hub: "ShieldHub", event: dict) -> None:
     hub.ContainerExited(event["container"], event.get("reason", ""))
 
 
+def _emit_shield_up(hub: "ShieldHub", event: dict) -> None:
+    """Fan a ``shield_up`` event out as a ``ShieldUp`` signal."""
+    hub.ShieldUp(event["container"])
+
+
+def _emit_shield_down(hub: "ShieldHub", event: dict) -> None:
+    """Fan a ``shield_down`` event out as a ``ShieldDown`` signal."""
+    hub.ShieldDown(event["container"])
+
+
+def _emit_shield_down_all(hub: "ShieldHub", event: dict) -> None:
+    """Fan a ``shield_down_all`` event out as a ``ShieldDownAll`` signal."""
+    hub.ShieldDownAll(event["container"])
+
+
 #: Catalog: reader event ``type`` → hub signal emitter.  Unknown types are
 #: dropped by the sink so the wire format can grow without breaking old
 #: hubs.  KeyError on a malformed event is caught by the ingester's
@@ -182,6 +197,9 @@ _EVENT_EMITTERS: dict[str, Callable[["ShieldHub", dict], None]] = {
     "pending": _emit_pending,
     "container_started": _emit_container_started,
     "container_exited": _emit_container_exited,
+    "shield_up": _emit_shield_up,
+    "shield_down": _emit_shield_down,
+    "shield_down_all": _emit_shield_down_all,
 }
 
 
@@ -261,6 +279,21 @@ class ShieldHub(ServiceInterface):
     def ContainerExited(self, container: "s", reason: "s") -> "ss":  # noqa: F821  # pragma: no cover
         """Announce that a container's reader went away."""
         return [container, reason]
+
+    @signal()
+    def ShieldUp(self, container: "s") -> "s":  # noqa: F821  # pragma: no cover
+        """Announce that a container's shield was re-armed after manual bypass."""
+        return container
+
+    @signal()
+    def ShieldDown(self, container: "s") -> "s":  # noqa: F821  # pragma: no cover
+        """Announce that a container's shield was manually dropped to bypass mode."""
+        return container
+
+    @signal()
+    def ShieldDownAll(self, container: "s") -> "s":  # noqa: F821  # pragma: no cover
+        """Announce that a container's shield was dropped to allow-everything bypass."""
+        return container
 
 
 # ── Verdict execution ────────────────────────────────────────────────

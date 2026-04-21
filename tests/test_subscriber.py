@@ -217,6 +217,72 @@ class TestShieldSignals:
         await asyncio.sleep(0)
         mock_notifier.notify.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("member", "hook"),
+        [
+            ("ShieldUp", "on_shield_up"),
+            ("ShieldDown", "on_shield_down"),
+            ("ShieldDownAll", "on_shield_down_all"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_shield_state_signals_forward_to_hooks(self, member: str, hook: str) -> None:
+        """Each Shield* signal fires the matching optional hook on the notifier."""
+        notifier = AsyncMock()
+        setattr(notifier, hook, MagicMock())
+        bus = _mock_bus()
+        sub = EventSubscriber(notifier, bus=bus)
+        sub._shield_owner = _HUB_UNIQUE
+        msg = Message(
+            message_type=MessageType.SIGNAL,
+            sender=_HUB_UNIQUE,
+            path=SHIELD_OBJECT_PATH,
+            interface=SHIELD_INTERFACE_NAME,
+            member=member,
+            body=[CONTAINER],
+        )
+        sub._on_message(msg)
+        await asyncio.sleep(0)
+        getattr(notifier, hook).assert_called_once_with(CONTAINER)
+
+    @pytest.mark.parametrize("member", ["ShieldDown", "ShieldDownAll"])
+    @pytest.mark.asyncio
+    async def test_shield_down_closes_pending_notifications(self, member: str) -> None:
+        """ShieldDown drops pending blocks for the affected container."""
+        notifier = AsyncMock()
+        notifier.close = AsyncMock()
+        # Explicitly pin the optional sync hooks so AsyncMock doesn't auto-generate
+        # coroutine-returning attrs that never get awaited.
+        notifier.on_shield_down = MagicMock()
+        notifier.on_shield_down_all = MagicMock()
+        bus = _mock_bus()
+        sub = EventSubscriber(notifier, bus=bus)
+        sub._shield_owner = _HUB_UNIQUE
+        # Seed two pending blocks: one for *CONTAINER*, one for another.
+        from terok_dbus._subscriber import _PendingBlock
+
+        sub._pending[_REQUEST_ID] = _PendingBlock(
+            notification_id=42, container=CONTAINER, request_id=_REQUEST_ID, dest=DEST_IP
+        )
+        sub._pending["other:1"] = _PendingBlock(
+            notification_id=43, container="other", request_id="other:1", dest=DEST_IP
+        )
+        msg = Message(
+            message_type=MessageType.SIGNAL,
+            sender=_HUB_UNIQUE,
+            path=SHIELD_OBJECT_PATH,
+            interface=SHIELD_INTERFACE_NAME,
+            member=member,
+            body=[CONTAINER],
+        )
+        sub._on_message(msg)
+        # Two scheduled coroutines (handler + lifecycle) — one sleep lets both run.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        notifier.close.assert_awaited_once_with(42)
+        assert _REQUEST_ID not in sub._pending
+        assert "other:1" in sub._pending  # untouched — different container
+
     @pytest.mark.asyncio
     async def test_spoofed_shield_signal_is_dropped(self, mock_notifier: AsyncMock) -> None:
         """Once the hub owner is known, signals from other senders don't drive state."""
