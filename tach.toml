@@ -57,6 +57,14 @@ path = "terok_clearance.domain.identity"
 layer = "domain"
 depends_on = []
 
+# Container-inspection facts — pure data, mirrors what ``podman
+# inspect`` returns.  Built by ``client.podman_inspector``; consumed
+# by ``client.identity_resolver`` and anything else that cares.
+[[modules]]
+path = "terok_clearance.domain.container_info"
+layer = "domain"
+depends_on = []
+
 
 # ── Wire layer ──────────────────────────────────────────────────────
 
@@ -172,6 +180,24 @@ depends_on = [
     # tach.ignore_type_checking_imports skips it, so it's not in deps.
 ]
 
+# Container introspection — cached ``podman inspect`` wrapper.  The
+# ``ContainerInfo`` domain type lives one layer below; the import
+# crosses the layer boundary in the allowed direction so no explicit
+# dep line is needed.
+[[modules]]
+path = "terok_clearance.client.podman_inspector"
+layer = "infrastructure"
+depends_on = []
+
+# Task-aware identity resolution — composes ``PodmanInspector`` with
+# the ``ai.terok.task_meta_path`` annotation data contract.
+[[modules]]
+path = "terok_clearance.client.identity_resolver"
+layer = "infrastructure"
+depends_on = [
+    "terok_clearance.client.podman_inspector",
+]
+
 # Runtime — deployment helpers.
 [[modules]]
 path = "terok_clearance.runtime.service"
@@ -182,6 +208,20 @@ depends_on = []
 path = "terok_clearance.runtime.installer"
 layer = "infrastructure"
 depends_on = []
+
+# Notifier daemon — subscribes to the hub, renders desktop popups.
+# Separate feature dir so its lifecycle is isolated from the hub/verdict
+# pair; installed by the runtime installer but runs in its own systemd
+# unit with its own crash radius.
+[[modules]]
+path = "terok_clearance.notifier.app"
+layer = "infrastructure"
+depends_on = [
+    "terok_clearance.client.identity_resolver",
+    "terok_clearance.client.subscriber",
+    "terok_clearance.notifications.factory",
+    "terok_clearance.runtime.service",
+]
 
 
 # ── Interface layer ─────────────────────────────────────────────────
