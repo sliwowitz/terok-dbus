@@ -81,7 +81,7 @@ deployment plumbing); layers say *how free* (domain modules know
 nothing about wire; wire knows only domain; infrastructure knows
 both; interface knows all of the above).
 
-```
+```text
 interface       ──→ cli/, __init__.py
 infrastructure  ──→ hub/, client/, notifications/{desktop,null,callback,factory}, runtime/
 wire            ──→ wire/

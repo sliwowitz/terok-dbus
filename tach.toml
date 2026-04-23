@@ -100,6 +100,17 @@ path = "terok_clearance.notifications.desktop"
 layer = "infrastructure"
 depends_on = []
 
+[[modules]]
+path = "terok_clearance.notifications.factory"
+layer = "infrastructure"
+depends_on = [
+    "terok_clearance.notifications.desktop",
+    "terok_clearance.notifications.null",
+    # notifications.protocol sits in the domain layer — the infra →
+    # domain dep is implicit via the layer hierarchy; listing it here
+    # reads as "unused" to ``tach check``.
+]
+
 # Hub — varlink server + reader ingestion + shield exec.
 [[modules]]
 path = "terok_clearance.hub.ingester"
@@ -151,7 +162,7 @@ depends_on = ["terok_clearance.cli.registry"]
 [[modules]]
 path = "terok_clearance.cli.registry"
 layer = "interface"
-depends_on = ["terok_clearance", "terok_clearance.cli.terminal_clearance"]
+depends_on = ["terok_clearance.cli.terminal_clearance"]
 
 [[modules]]
 path = "terok_clearance.cli.terminal_clearance"

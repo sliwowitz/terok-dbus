@@ -18,15 +18,17 @@ from dataclasses import dataclass
 class ClearanceEvent:
     """One event fanned out to every ``Subscribe()`` caller.
 
-    Known values of ``type``:
+    ``type`` + ``container`` are always populated; the remaining fields
+    are filled in per-kind and default to zero-values otherwise.
 
-    * ``connection_blocked`` — sets ``request_id``, ``dest``, ``port``,
+    Known values of ``type`` (additional fields beyond ``container``):
+
+    * ``connection_blocked`` — ``request_id``, ``dest``, ``port``,
       ``proto``, ``domain``.  Requires an operator verdict.
-    * ``verdict_applied`` — sets ``request_id``, ``action``, ``ok``.
-    * ``container_started`` — just ``container``.
-    * ``container_exited`` — ``container`` + ``reason``.
-    * ``shield_up`` / ``shield_down`` / ``shield_down_all`` — just
-      ``container``.
+    * ``verdict_applied`` — ``request_id``, ``action``, ``ok``.
+    * ``container_started`` — no extras.
+    * ``container_exited`` — ``reason``.
+    * ``shield_up`` / ``shield_down`` / ``shield_down_all`` — no extras.
 
     Unknown values are forwarded unchanged so the wire format can grow
     without breaking clients pinned to older schemas.

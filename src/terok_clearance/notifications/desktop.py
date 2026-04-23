@@ -12,9 +12,11 @@ from typing import Any
 
 from dbus_fast.aio import MessageBus
 
-#: Addressing for the freedesktop Notifications service.  Kept private to
-#: this module — the Notifier protocol is the abstraction consumers should
-#: use; exposing these invites re-implementing the spec.
+#: Addressing for the freedesktop Notifications service.  Exposed at
+#: module scope so tests + out-of-tree consumers can reference the
+#: same literals the backend dispatches against, but callers in new
+#: code should reach for the :class:`~.protocol.Notifier` abstraction
+#: instead of re-implementing the spec.
 BUS_NAME = "org.freedesktop.Notifications"
 OBJECT_PATH = "/org/freedesktop/Notifications"
 INTERFACE_NAME = "org.freedesktop.Notifications"
